@@ -10,6 +10,8 @@ object AsyncTaskPipeline {
 object Builder {
   def pipe[A, B]() = new PipeB[A, B]
 
+  def sinkToGrowable[A](dest:scala.collection.generic.Growable[A]) = new SinkToGrowable[A](dest)
+
   class PipeB[A, B] {
     def unordered(proc:A => Option[B]):Pipe[A, B] = {
       new UnorderdPipeImpl[A, B](
@@ -17,9 +19,9 @@ object Builder {
         ThreadPoolConfig.default()
       )
     }
-    def unordered() = new Unique
+    def unordered() = new Unordered
 
-    class Unique {
+    class Unordered {
       def unique[G](groupOf:A => G)(proc:A => Option[B]) = new UnorderedUniquePipeImpl(
         groupOf, proc,
         10,
@@ -53,15 +55,26 @@ trait Sink[A] extends Closure {
   override def run():SinkExecutionContext[A]
 }
 
+class SinkToGrowable[A](val dest:scala.collection.generic.Growable[A]) extends Sink[A] {
+  override def run() = new Ctx
+
+  class Ctx extends SinkExecutionContext[A] {
+    override def await() = ()
+    override def feed(value:A) = synchronized { dest += value }
+  }
+}
+
 trait SourceExecutionContext[A] extends ExecutionContext {
   def wireTo(sink:SinkExecutionContext[A]):Unit
 }
 abstract class SourceExecutionContextImpl[A] extends SourceExecutionContext[A] {
   var wiredSink:SinkExecutionContext[A] = ExecutionContext.nullSink()
+  private[this] var wired = false
   override def wireTo(sink:SinkExecutionContext[A]):Unit = {
-    if(wiredSink != null)
+    if(wired)
       throw new RuntimeException("Ahhhhhggggg")
     wiredSink = sink
+    wired = true
   }
 }
 
