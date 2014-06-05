@@ -13,20 +13,20 @@ object Builder {
   def sinkToGrowable[A](dest:scala.collection.generic.Growable[A]) = new SinkToGrowable[A](dest)
 
   class PipeB[A, B] {
-    def unordered(proc:A => Option[B]):Pipe[A, B] = {
-      new UnorderdPipeImpl[A, B](
-        proc,
-        ThreadPoolConfig.default()
-      )
+    def unordered(thc:ThreadPoolConfig)(proc:A => Option[B]):Pipe[A, B] = {
+      new UnorderdPipeImpl[A, B](proc, thc)
     }
-    def unordered() = new Unordered
+    def unordered(proc:A => Option[B]):Pipe[A, B] = unordered(ThreadPoolConfig.default())(proc)
 
-    class Unordered {
-      def unique[G](groupOf:A => G)(proc:A => Option[B]) = new UnorderedUniquePipeImpl(
+    def unordered() = new UnorderedB
+    class UnorderedB {
+      def unique[G](thc:ThreadPoolConfig)(groupOf:A => G)(proc:A => Option[B]) = new UnorderedUniquePipeImpl[A, B, G](
         groupOf, proc,
         10,
-        ThreadPoolConfig.default()
+        thc
       )
+      def unique[G](groupOf:A => G)(proc:A => Option[B]):UnorderedUniquePipeImpl[A, B, G] =
+        unique[G](ThreadPoolConfig.default())(groupOf)(proc)
     }
   }
 }
@@ -131,10 +131,10 @@ class ConnectPipeSink[A, B](
 }
 
 case class ThreadPoolConfig(
-  queueSize:Int,
-  corePoolSize:Int,
-  maxPoolSize:Int,
-  keepAliveMillis:Int
+  queueSize:Int = 10,
+  corePoolSize:Int = 1,
+  maxPoolSize:Int = 10,
+  keepAliveMillis:Int = 100
 ) {
   def createThreadPool() =
     new BlockingThreadPoolExecutor(
@@ -145,12 +145,7 @@ case class ThreadPoolConfig(
 }
 
 object ThreadPoolConfig {
-  def default():ThreadPoolConfig = ThreadPoolConfig(
-    queueSize = 10,
-    corePoolSize = 1,
-    maxPoolSize = 10,
-    keepAliveMillis = 100
-  )
+  def default():ThreadPoolConfig = ThreadPoolConfig()
 }
 
 class UnorderdPipeImpl[A, B](
