@@ -46,6 +46,18 @@ class Spec extends FlatSpec with Matchers {
     results.sorted should be((1 to 2000).filter(_ % 2 == 0))
   }
 
+  "UnorderedUniqueBufferedPipeImpl[A]" should "process values" in {
+    val results = new mutable.ArrayBuffer[Int]
+    val sink = builder.sinkToGrowable(results)
+
+    val ctx = (builder.pipe[Int, Int].unordered.bufferedUnique(10)(i => i / 3) {i => if(i % 2 == 0) Some(i) else None } >> sink).run()
+
+    (1 to 2000).foreach(ctx.feed(_))
+    ctx.await()
+
+    results.sorted should be((1 to 2000).filter(_ % 2 == 0))
+  }
+
   "Complex pipeline" should "process values" in {
     val results = new mutable.ArrayBuffer[Int]
     val sink = builder.sinkToGrowable(results)

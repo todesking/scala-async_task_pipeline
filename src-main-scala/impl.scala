@@ -123,4 +123,41 @@ class UnorderedUniquePipeImpl[A, B, G](
   }
 }
 
+class UnorderedUniqueBufferedPipeImpl[A, B, G](
+  val groupOf:(A => G),
+  val proc:A => Option[B],
+  val thc:ThreadPoolConfig,
+  val bufferSize:Int
+) extends Pipe[A, B] {
+  def run() = new Ctx()
+  class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
+    val queues = new mutable.HashMap[G, jc.ArrayBlockingQueue[A]]
+    val lock = new AnyRef
 
+    val ctx = AsyncTaskPipeline.builder.pipe[G, Unit].unordered.unique[G](thc)(identity)({g:G =>
+      for {
+        queue <- lock.synchronized { queues.get(g) }
+        value = queue.poll()
+        result <- proc(value) if value != null
+      } {
+        wiredSink.feed(result)
+      }
+      None
+    }).run()
+
+    override def feed(value:A):Unit = {
+      val g = groupOf(value)
+      val queue =
+        lock.synchronized {
+          if(!queues.contains(g)) {
+            queues.put(g, new jc.ArrayBlockingQueue[A](bufferSize))
+          }
+          queues.get(g).get
+        }
+      queue.put(value)
+      ctx.feed(g)
+    }
+
+    override def await():Unit = ctx.await()
+  }
+}
