@@ -14,7 +14,7 @@ object Builder {
 
   class PipeB[A, B] {
     def unordered(thc:ThreadPoolConfig)(proc:A => Option[B]):Pipe[A, B] = {
-      new UnorderdPipeImpl[A, B](proc, thc)
+      new UnorderedPipeImpl[A, B](proc, thc)
     }
     def unordered(proc:A => Option[B]):Pipe[A, B] = unordered(ThreadPoolConfig.default())(proc)
 
@@ -148,7 +148,7 @@ object ThreadPoolConfig {
   def default():ThreadPoolConfig = ThreadPoolConfig()
 }
 
-class UnorderdPipeImpl[A, B](
+class UnorderedPipeImpl[A, B](
   val proc:(A => Option[B]),
   val threadPoolConfig:ThreadPoolConfig
 ) extends Pipe[A, B] {
@@ -178,7 +178,8 @@ class UnorderedUniquePipeImpl[A, B, G](
   proc:(A => Option[B]),
   val retryIntervalMillis:Int,
   threadPoolConfig:ThreadPoolConfig
-) extends UnorderdPipeImpl[A, B](proc, threadPoolConfig) {
+) extends Pipe[A, B] {
+  override def run() = new Ctx()
   class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val threadPool = threadPoolConfig.createThreadPool()
     val processing = new mutable.HashSet[G]
