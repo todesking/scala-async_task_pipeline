@@ -6,10 +6,10 @@ object Builder {
   def sinkToGrowable[A](dest:scala.collection.generic.Growable[A]) = new SinkToGrowable[A](dest)
 
   class PipeB[A, B] {
-    def unordered(thc:ThreadPoolConfig)(proc:A => Option[B]):Pipe[A, B] = {
+    def unordered(thc:ThreadPoolConfig)(proc:A => Option[B]):UnorderedPipeImpl[A, B] = {
       new UnorderedPipeImpl[A, B](proc, thc)
     }
-    def unordered(proc:A => Option[B]):Pipe[A, B] = unordered(ThreadPoolConfig.default())(proc)
+    def unordered(proc:A => Option[B]):UnorderedPipeImpl[A, B] = unordered(ThreadPoolConfig.default())(proc)
 
     def unordered() = new UnorderedB
     class UnorderedB {
