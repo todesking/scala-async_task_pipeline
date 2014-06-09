@@ -68,8 +68,12 @@ class SinkToGrowable[A](val dest:scala.collection.generic.Growable[A]) extends S
 
 class UnorderedPipeImpl[A, B](
   val proc:(A => Option[B]),
-  val threadPoolConfig:ThreadPoolConfig
+  val threadPoolConfig:ThreadPoolConfig,
+  val name:String
 ) extends Pipe[A, B] {
+  def this(proc:A => Option[B], tc:ThreadPoolConfig) = this(proc, tc, "unnamed pipe(unorderd)")
+  def named(n:String) = new UnorderedPipeImpl(proc, threadPoolConfig, name)
+
   override def run() = new Ctx()
 
   class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
@@ -88,7 +92,7 @@ class UnorderedPipeImpl[A, B](
       while(!threadPool.awaitTermination(100, jc.TimeUnit.MILLISECONDS)) ();
     }
 
-    override def statusMessage() = s"{pipe(unorderd) Waiting ${threadPool.getQueue.size} Threads ${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
+    override def statusMessage() = s"{$name: Waiting ${threadPool.getQueue.size} Threads ${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
   }
 }
 
@@ -97,8 +101,12 @@ class UnorderedUniquePipeImpl[A, B, G](
   val groupOf:(A => G),
   proc:(A => Option[B]),
   val retryIntervalMillis:Int,
-  threadPoolConfig:ThreadPoolConfig
-) extends Pipe[A, B] {
+  threadPoolConfig:ThreadPoolConfig,
+  val name:String
+ )extends Pipe[A, B] {
+   def this(groupOf:(A => G), proc:(A => Option[B]), retryIntervalMillis:Int, tc:ThreadPoolConfig) = this(groupOf, proc, retryIntervalMillis, tc, "unnamed pipe(unique, unorderd)")
+
+  def named(n:String) = new UnorderedUniquePipeImpl(groupOf, proc, retryIntervalMillis, threadPoolConfig, n)
   override def run() = new Ctx()
   class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val threadPool = threadPoolConfig.createThreadPool()
@@ -136,7 +144,7 @@ class UnorderedUniquePipeImpl[A, B, G](
       while(!threadPool.awaitTermination(100, jc.TimeUnit.MILLISECONDS)) ();
     }
 
-    override def statusMessage() = s"{pipe(unorderd, unique) Waiting ${threadPool.getQueue.size} Threads ${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
+    override def statusMessage() = s"{$name: Waiting:${threadPool.getQueue.size} Threads:${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
   }
 }
 
@@ -144,8 +152,10 @@ class UnorderedUniqueBufferedPipeImpl[A, B, G](
   val groupOf:(A => G),
   val proc:A => Option[B],
   val thc:ThreadPoolConfig,
-  val bufferSize:Int
+  val bufferSize:Int,
+  val name:String
 ) extends Pipe[A, B] {
+  def this(groupOf:(A => G), proc:(A => Option[B]), thc:ThreadPoolConfig, bufferSize:Int) = this(groupOf, proc, thc, bufferSize, "unnamed pipe(unorderd, unique-buffered)")
   def run() = new Ctx()
   class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val queues = new mutable.HashMap[G, jc.ArrayBlockingQueue[A]]
@@ -160,7 +170,7 @@ class UnorderedUniqueBufferedPipeImpl[A, B, G](
         wiredSink.feed(result)
       }
       None
-    }).run()
+    }).named(name).run()
 
     override def feed(value:A):Unit = {
       val g = groupOf(value)

@@ -40,7 +40,7 @@ class Spec extends FlatSpec with Matchers {
     val results = new mutable.ArrayBuffer[Int]
     val sink = builder.sinkToGrowable(results)
 
-    val ctx = (builder.pipe[Int, Int].unordered.unique(i => i / 3) {i => if(i % 2 == 0) Some(i) else None } >> sink).run()
+    val ctx = (builder.pipe[Int, Int].unordered.unique(i => i / 3) {i => if(i % 2 == 0) Some(i) else None }.named("even") >> sink).run()
 
     (1 to 2000).foreach(ctx.feed(_))
     println(ctx.statusMessage)
