@@ -10,6 +10,8 @@ object AsyncTaskPipeline {
 trait ExecutionContext {
   // Close pipe and await all process finished
   def await():Unit
+
+  def statusMessage():String = s"(${toString})"
 }
 
 object ExecutionContext {
@@ -29,15 +31,6 @@ trait SinkExecutionContext[A] extends ExecutionContext {
 }
 trait Sink[A] extends Closure {
   override def run():SinkExecutionContext[A]
-}
-
-class SinkToGrowable[A](val dest:scala.collection.generic.Growable[A]) extends Sink[A] {
-  override def run() = new Ctx
-
-  class Ctx extends SinkExecutionContext[A] {
-    override def await() = ()
-    override def feed(value:A) = synchronized { dest += value }
-  }
 }
 
 trait SourceExecutionContext[A] extends ExecutionContext {

@@ -31,6 +31,8 @@ class ConnectPipePipe[A, B, C] (
       leftContext.await()
       rightContext.await()
     }
+
+    override def statusMessage() = s"${leftContext.statusMessage} >> ${rightContext.statusMessage}"
   }
 }
 
@@ -50,6 +52,17 @@ class ConnectPipeSink[A, B](
       leftContext.await()
       rightContext.await()
     }
+    override def statusMessage() = s"${leftContext.statusMessage} >> ${rightContext.statusMessage}"
+  }
+}
+
+class SinkToGrowable[A](val dest:scala.collection.generic.Growable[A]) extends Sink[A] {
+  override def run() = new Ctx
+
+  class Ctx extends SinkExecutionContext[A] {
+    override def await() = ()
+    override def feed(value:A) = synchronized { dest += value }
+    override def statusMessage() = "{sinkToGrowable}"
   }
 }
 
@@ -74,6 +87,8 @@ class UnorderedPipeImpl[A, B](
       threadPool.shutdown()
       while(!threadPool.awaitTermination(100, jc.TimeUnit.MILLISECONDS)) ();
     }
+
+    override def statusMessage() = s"{pipe(unorderd) Waiting ${threadPool.getQueue.size} Threads ${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
   }
 }
 
@@ -120,6 +135,8 @@ class UnorderedUniquePipeImpl[A, B, G](
       threadPool.shutdown
       while(!threadPool.awaitTermination(100, jc.TimeUnit.MILLISECONDS)) ();
     }
+
+    override def statusMessage() = s"{pipe(unorderd, unique) Waiting ${threadPool.getQueue.size} Threads ${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
   }
 }
 
@@ -159,5 +176,6 @@ class UnorderedUniqueBufferedPipeImpl[A, B, G](
     }
 
     override def await():Unit = ctx.await()
+    override def statusMessage() = s"${ctx.statusMessage}"
   }
 }

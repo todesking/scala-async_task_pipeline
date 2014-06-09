@@ -17,6 +17,7 @@ class Spec extends FlatSpec with Matchers {
     ctx.feed(1)
     ctx.feed(2)
     ctx.feed(3)
+    println(ctx.statusMessage)
     ctx.await()
 
     results should be(Seq(1, 2, 3))
@@ -29,6 +30,7 @@ class Spec extends FlatSpec with Matchers {
     val ctx = (builder.pipe[Int, Int].unordered {i => if(i % 2 == 0) Some(i) else None } >> sink).run()
 
     (1 to 2000).foreach(ctx.feed(_))
+    println(ctx.statusMessage)
     ctx.await()
 
     results.sorted should be((1 to 2000).filter(_ % 2 == 0))
@@ -41,6 +43,7 @@ class Spec extends FlatSpec with Matchers {
     val ctx = (builder.pipe[Int, Int].unordered.unique(i => i / 3) {i => if(i % 2 == 0) Some(i) else None } >> sink).run()
 
     (1 to 2000).foreach(ctx.feed(_))
+    println(ctx.statusMessage)
     ctx.await()
 
     results.sorted should be((1 to 2000).filter(_ % 2 == 0))
@@ -53,6 +56,7 @@ class Spec extends FlatSpec with Matchers {
     val ctx = (builder.pipe[Int, Int].unordered.bufferedUnique(10)(i => i / 3) {i => if(i % 2 == 0) Some(i) else None } >> sink).run()
 
     (1 to 2000).foreach(ctx.feed(_))
+    println(ctx.statusMessage)
     ctx.await()
 
     results.sorted should be((1 to 2000).filter(_ % 2 == 0))
@@ -77,6 +81,7 @@ class Spec extends FlatSpec with Matchers {
     (1 to 1000).foreach(i => ctx.feed(i.toString))
     Seq("a", "b", "c").foreach(ctx.feed(_))
     (1001 to 2000).foreach(i => ctx.feed(i.toString))
+    println(ctx.statusMessage)
     ctx.await()
 
     results.sorted should be((1 to 2000).map(_ * 2))
