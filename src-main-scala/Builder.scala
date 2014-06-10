@@ -21,10 +21,11 @@ object Builder {
       def unique[G](groupOf:A => G)(proc:A => Option[B]):UnorderedUniquePipeImpl[A, B, G] =
         unique[G](ThreadPoolConfig.default())(groupOf)(proc)
 
-      def bufferedUnique[G](thc:ThreadPoolConfig)(bufferSize:Int)(groupOf:A => G)(proc:A => Option[B]):Pipe[A, B] =
+      def bufferedUnique[G](thc:ThreadPoolConfig)(bufferSize:Int)(groupOf:A => G)(proc:A => Option[B]):UnorderedUniqueBufferedPipeImpl[A, B, G] =
         new UnorderedUniqueBufferedPipeImpl[A, B, G](groupOf, proc, thc, bufferSize)
 
-      def bufferedUnique[G](bufferSize:Int)(groupOf:A => G)(proc: A => Option[B]):Pipe[A, B] = bufferedUnique[G](ThreadPoolConfig.default())(bufferSize)(groupOf)(proc)
+      def bufferedUnique[G](bufferSize:Int)(groupOf:A => G)(proc: A => Option[B]):UnorderedUniqueBufferedPipeImpl[A, B, G] =
+        bufferedUnique[G](ThreadPoolConfig.default())(bufferSize)(groupOf)(proc)
     }
   }
 }
