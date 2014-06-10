@@ -72,7 +72,7 @@ class UnorderedPipeImpl[A, B](
   val name:String
 ) extends Pipe[A, B] {
   def this(proc:A => Option[B], tc:ThreadPoolConfig) = this(proc, tc, "unnamed pipe(unorderd)")
-  def named(n:String) = new UnorderedPipeImpl(proc, threadPoolConfig, name)
+  def named(n:String) = new UnorderedPipeImpl(proc, threadPoolConfig, n)
 
   override def run() = new Ctx()
 
@@ -156,6 +156,8 @@ class UnorderedUniqueBufferedPipeImpl[A, B, G](
   val name:String
 ) extends Pipe[A, B] {
   def this(groupOf:(A => G), proc:(A => Option[B]), thc:ThreadPoolConfig, bufferSize:Int) = this(groupOf, proc, thc, bufferSize, "unnamed pipe(unorderd, unique-buffered)")
+
+  def named(n:String) = new UnorderedUniqueBufferedPipeImpl(groupOf, proc, thc, bufferSize, n)
   def run() = new Ctx()
   class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val queues = new mutable.HashMap[G, jc.ArrayBlockingQueue[A]]
