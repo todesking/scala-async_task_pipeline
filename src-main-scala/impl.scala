@@ -3,6 +3,24 @@ package com.todesking.async_task_pipeline
 import java.util.{concurrent => jc}
 import scala.collection.{mutable => mutable}
 
+private class RichThreadPoolExecutor(val th:jc.ThreadPoolExecutor) {
+  def statusMessage():String = s"Queue: ${queueStatus}, Workers: ${workersStatus}"
+
+  def queueStatus():String = {
+    val queue = th.getQueue
+    val rem = queue.remainingCapacity
+    val size = queue.size
+    s"${size}${if(rem == Int.MaxValue) "" else s"/${size + rem}"}"
+  }
+
+  def workersStatus():String = s"${th.getActiveCount}/${th.getPoolSize}"
+}
+
+private object RichThreadPoolExecutor {
+  implicit def richThreadPoolExecutor(th:jc.ThreadPoolExecutor) = new RichThreadPoolExecutor(th)
+}
+import RichThreadPoolExecutor._
+
 abstract class SourceExecutionContextImpl[A] extends SourceExecutionContext[A] {
   var wiredSink:SinkExecutionContext[A] = ExecutionContext.nullSink()
   private[this] var wired = false
@@ -92,7 +110,7 @@ class UnorderedPipeImpl[A, B](
       while(!threadPool.awaitTermination(100, jc.TimeUnit.MILLISECONDS)) ();
     }
 
-    override def statusMessage() = s"{$name: Waiting ${threadPool.getQueue.size} Threads ${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
+    override def statusMessage() = s"{$name: ${threadPool.statusMessage}}"
   }
 }
 
@@ -144,7 +162,7 @@ class UnorderedUniquePipeImpl[A, B, G](
       while(!threadPool.awaitTermination(100, jc.TimeUnit.MILLISECONDS)) ();
     }
 
-    override def statusMessage() = s"{$name: Waiting:${threadPool.getQueue.size} Threads:${threadPool.getActiveCount}/${threadPool.getPoolSize}}"
+    override def statusMessage() = s"{$name: ${threadPool.statusMessage}}"
   }
 }
 
