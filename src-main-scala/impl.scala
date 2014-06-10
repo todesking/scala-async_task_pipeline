@@ -1,5 +1,7 @@
 package com.todesking.async_task_pipeline
 
+import scala.language.implicitConversions
+
 import java.util.{concurrent => jc}
 import scala.collection.{mutable => mutable}
 
