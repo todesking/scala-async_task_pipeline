@@ -4,7 +4,7 @@ name := "async_task_pipeline"
 
 version := "0.0.7"
 
-scalaVersion := "2.10.4"
+scalaVersion := "2.11.7"
 
 publishTo := Some(Resolver.file("com.todesking",file("./repo/"))(Patterns(true, Resolver.mavenStyleBasePattern)))
 
