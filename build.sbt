@@ -2,7 +2,7 @@ organization := "com.todesking"
 
 name := "async_task_pipeline"
 
-version := "0.0.7"
+version := "0.0.8-SNAPSHOT"
 
 scalaVersion := "2.11.7"
 
