@@ -86,6 +86,16 @@ class SinkToGrowable[A](val dest:scala.collection.generic.Growable[A]) extends S
   }
 }
 
+class ParallelPipe[A, B](pipes: Pipe[A, B]*) extends Pipe[A, B] {
+  override def run(): PipeExecutionContext[A, B] = new PipeExecutionContext[A, B] {
+    val pipeContexts = pipes.map(_.run())
+    override def feed(v: A): Unit = pipeContexts.foreach(_.feed(v))
+    override def await(): Unit = pipeContexts.foreach(_.await())
+    override def wireTo(sink: SinkExecutionContext[B]): Unit =
+      pipeContexts.foreach(_.wireTo(sink))
+  }
+}
+
 class UnorderedPipeImpl[A, B](
   val proc:(A => Option[B]),
   val threadPoolConfig:ThreadPoolConfig,

@@ -46,6 +46,7 @@ trait PipeExecutionContext[A, B] extends ExecutionContext with SinkExecutionCont
 trait Pipe[A, B] extends Closure with Sink[A] with Source[B] {
   def >>(sink:Sink[B]):Sink[A] = new ConnectPipeSink[A, B](this, sink)
   def >>[C](pipe:Pipe[B, C]):Pipe[A, C] = new ConnectPipePipe[A, B, C](this, pipe)
+  def |(other: Pipe[A, B]): Pipe[A, B] = new ParallelPipe[A, B](this, other)
   override def run():PipeExecutionContext[A, B]
 }
 
