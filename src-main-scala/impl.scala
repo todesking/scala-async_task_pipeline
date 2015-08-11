@@ -38,9 +38,7 @@ class ConnectPipePipe[A, B, C] (
   val lhs:Pipe[A, B],
   val rhs:Pipe[B, C]
 ) extends Pipe[A, C] {
-  override def run() = new Ctx()
-
-  class Ctx extends PipeExecutionContext[A, C] {
+  override def run(): PipeExecutionContext[A, C] = new PipeExecutionContext[A, C] {
     val leftContext = lhs.run()
     val rightContext = rhs.run()
     leftContext.wireTo(rightContext)
@@ -53,6 +51,8 @@ class ConnectPipePipe[A, B, C] (
     }
 
     override def statusMessage() = s"${leftContext.statusMessage} >> ${rightContext.statusMessage}"
+
+    override def elements = leftContext.elements ++ rightContext.elements
   }
 }
 
@@ -60,9 +60,7 @@ class ConnectPipeSink[A, B](
   val lhs:Pipe[A, B],
   val rhs:Sink[B]
 ) extends Sink[A] {
-  override def run() = new Ctx()
-
-  class Ctx extends SinkExecutionContext[A] {
+  override def run(): SinkExecutionContext[A] = new SinkExecutionContext[A] {
     val leftContext = lhs.run()
     val rightContext = rhs.run()
     leftContext.wireTo(rightContext)
@@ -73,16 +71,16 @@ class ConnectPipeSink[A, B](
       rightContext.await()
     }
     override def statusMessage() = s"${leftContext.statusMessage} >> ${rightContext.statusMessage}"
+    override def elements = leftContext.elements ++ rightContext.elements
   }
 }
 
 class SinkToGrowable[A](val dest:scala.collection.generic.Growable[A]) extends Sink[A] {
-  override def run() = new Ctx
-
-  class Ctx extends SinkExecutionContext[A] {
+  override def run(): SinkExecutionContext[A] = new SinkExecutionContext[A] {
     override def await() = ()
     override def feed(value:A) = synchronized { dest += value }
     override def statusMessage() = "{sinkToGrowable}"
+    override def elements = Seq.empty
   }
 }
 
@@ -93,6 +91,8 @@ class ParallelPipe[A, B](pipes: Pipe[A, B]*) extends Pipe[A, B] {
     override def await(): Unit = pipeContexts.foreach(_.await())
     override def wireTo(sink: SinkExecutionContext[B]): Unit =
       pipeContexts.foreach(_.wireTo(sink))
+    override def elements = pipeContexts.flatMap(_.elements)
+    override def statusMessage() = s"(${pipeContexts.map(_.statusMessage()).mkString(" | ")})"
   }
 }
 
@@ -104,9 +104,7 @@ class UnorderedPipeImpl[A, B](
   def this(proc:A => Option[B], tc:ThreadPoolConfig) = this(proc, tc, "unnamed pipe(unorderd)")
   def named(n:String) = new UnorderedPipeImpl(proc, threadPoolConfig, n)
 
-  override def run() = new Ctx()
-
-  class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
+  override def run(): PipeExecutionContext[A, B] = new SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val threadPool = threadPoolConfig.createThreadPool()
 
     override def feed(value:A):Unit = {
@@ -123,6 +121,7 @@ class UnorderedPipeImpl[A, B](
     }
 
     override def statusMessage() = s"{$name: ${threadPool.statusMessage}}"
+    override def elements = Seq(name -> this)
   }
 }
 
@@ -137,11 +136,12 @@ class UnorderedUniquePipeImpl[A, B, G](
    def this(groupOf:(A => G), proc:(A => Option[B]), retryIntervalMillis:Int, tc:ThreadPoolConfig) = this(groupOf, proc, retryIntervalMillis, tc, "unnamed pipe(unique, unorderd)")
 
   def named(n:String) = new UnorderedUniquePipeImpl(groupOf, proc, retryIntervalMillis, threadPoolConfig, n)
-  override def run() = new Ctx()
-  class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
+  override def run(): PipeExecutionContext[A, B] = new SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val threadPool = threadPoolConfig.createThreadPool()
     val processing = new mutable.HashSet[G]
     private[this] val lock:AnyRef = this
+
+   override val elements = Seq.empty[(String, ExecutionContext)]
 
     override def feed(value:A):Unit = {
       val g = groupOf(value)
@@ -192,6 +192,8 @@ class UnorderedUniqueBufferedPipeImpl[A, B, G](
   class Ctx extends SourceExecutionContextImpl[B] with PipeExecutionContext[A, B] {
     val queues = new mutable.HashMap[G, jc.ArrayBlockingQueue[A]]
     val lock = new AnyRef
+
+    override val elements = Seq.empty[(String, ExecutionContext)]
 
     val ctx = AsyncTaskPipeline.builder.pipe[G, Unit].unordered.unique[G](thc)(identity)({g:G =>
       for {

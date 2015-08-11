@@ -12,13 +12,19 @@ trait ExecutionContext {
   def await():Unit
 
   def statusMessage():String = s"(${toString})"
+
+  def getSink[A](name: String): SinkExecutionContext[A] =
+    elements.filter(_._1 == name).head._2.asInstanceOf[SinkExecutionContext[A]]
+
+  def elements: Seq[(String, ExecutionContext)]
 }
 
 object ExecutionContext {
   def nullSink[A]():SinkExecutionContext[A] =
     new SinkExecutionContext[A]() {
-      def feed(value:A):Unit = ()
-      def await():Unit = ()
+      override def feed(value:A):Unit = ()
+      override def await():Unit = ()
+      override def elements = Seq.empty
     }
 }
 
