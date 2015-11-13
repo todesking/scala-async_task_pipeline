@@ -35,6 +35,8 @@ class BlockingThreadPoolExecutor(corePoolSize:Int, maxPoolSize:Int, keepAliveMil
       }
     }
 ) {
+  def this(corePoolSize: Int, maxPoolSize: Int, keepAliveMillis: Int, queueSize: Int) =
+    this(corePoolSize, maxPoolSize, keepAliveMillis, new java.util.concurrent.ArrayBlockingQueue[Runnable](queueSize))
 }
 
 
