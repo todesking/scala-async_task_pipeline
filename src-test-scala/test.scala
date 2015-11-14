@@ -56,9 +56,9 @@ class Spec extends FlatSpec with Matchers {
     val results = new mutable.ArrayBuffer[Int]
     val par = ap.Parallelism.Constant(100)
     val ctx = runSink(
-      serialize(100)(
+      serialize(100){ i: Int => i % 2 }(
         buildPipe(par){i: Int => Seq(i + 1)}
-      ) { i => i % 2 } >>~ buildSinkToGrowable(results)
+      ) >>~ buildSinkToGrowable(results)
     )
 
     (0 to 1000) foreach { i => ctx.feed(i) }
@@ -74,9 +74,9 @@ class Spec extends FlatSpec with Matchers {
     var a: Int = 0
     var b: Int = 0
     val ctx = runSink(
-      serialize(100)(
+      serialize(100) { i: Int => i % 2 } (
         buildPipe(par){i: Int => if(i % 2 == 0) { val aa = a; Thread.sleep(0); a = aa + 1 } else { val bb = b; Thread.sleep(0); b = bb + 1 }; Seq.empty }
-      ) {i => i % 2 }
+      )
     )
     (1 to 10000).foreach { i => ctx.feed(i) }
     ctx.await()
@@ -100,11 +100,11 @@ class Spec extends FlatSpec with Matchers {
       >>>
       buildPipe[String, Int](par)(i => Seq(i.toInt))
       >>>
-      serialize(100)(
+      serialize(100) { i: Int => i % 2 == 0 }(
         buildPipe(par){i: Int => if(i % 2 == 0) { val aa = a; Thread.sleep(0); a = aa + 1 } else { val bb = b; Thread.sleep(0); b = bb + 1 }; Seq(i) }
         >>>
         buildPipe[Int, Int](par) {i => Seq(i * 2)}
-      ) { _ % 2 == 0 }
+      )
       >>~
       sink
     )

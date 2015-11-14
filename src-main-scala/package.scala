@@ -45,7 +45,7 @@ object Dataflow {
       g += value
     }
 
-  def serialize[A, B, C](bufferSize: Int)(pipe: Pipe[A, B])(key: A => C): Pipe[A, B] =
+  def serialize[A, B, C](bufferSize: Int)(key: A => C)(pipe: Pipe[A, B]): Pipe[A, B] =
     Serialize(bufferSize, pipe, key)
 
   def runSink[A](sink: Sink[A]): SinkExecution[A] = sink match {
