@@ -123,7 +123,7 @@ trait PipeExecution[-A, +B] extends DataflowExecution with SinkExecution[A] with
   def executionContext: ExecutionContext
 
   override def feed(value: A): Unit =
-    feedPipe(value) { _ => }
+    feedPipe1(value) { _ => }
 
   def feedPipe(value: A)(callback: Seq[B] => Unit): Unit
 
@@ -161,6 +161,10 @@ object DataflowExecution {
             }
           }
         }
+      }
+    override def feedPipe1(value: A)(cb: C => Unit) =
+      left.feedPipe1(value) { v1 =>
+        right.feedPipe1(v1)(cb)
       }
 
     override def statusString = s"${left.statusString} >>> ${right.statusString}"
@@ -205,12 +209,25 @@ object DataflowExecution {
     }
 
     override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
+      val countdown = new java.util.concurrent.atomic.AtomicInteger(2)
+      val results = scala.collection.mutable.ArrayBuffer.empty[B]
       def feedToOut(bs: Seq[B]): Unit = {
-        callback(bs)
-        bs.foreach(outBuffer.feed(_))
+        results.synchronized { results ++= bs }
+        if(countdown.decrementAndGet() == 0) {
+          callback(results)
+          results.foreach(outBuffer.feed(_))
+        }
       }
       left.feedPipe(value)(feedToOut)
       right.feedPipe(value)(feedToOut)
+    }
+
+    override def feedPipe1(value: A)(callback: B => Unit): Unit = {
+      def feedToOut(b: B): Unit =
+        outBuffer.feedPipe1(b)(callback)
+
+      left.feedPipe1(value)(feedToOut)
+      right.feedPipe1(value)(feedToOut)
     }
 
     override def statusString = s"(${left.statusString()} <=> ${right.statusString()}) >>> ${outBuffer.statusString()}"

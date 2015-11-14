@@ -90,6 +90,9 @@ class Spec extends FlatSpec with Matchers {
     val sink = buildSinkToGrowable(results)
     val par = ap.Parallelism.Constant(100)
 
+    var a: Int = 0
+    var b: Int = 0
+
     val ctx = runSink(
       buildPipe[String, Int](par)(i => try {Seq(i.toInt)} catch { case _:NumberFormatException => Seq.empty })
       >>>
@@ -97,17 +100,23 @@ class Spec extends FlatSpec with Matchers {
       >>>
       buildPipe[String, Int](par)(i => Seq(i.toInt))
       >>>
-      buildPipe[Int, Int](par) {i => Seq(i * 2)}
+      serialize(100)(
+        buildPipe(par){i: Int => if(i % 2 == 0) { val aa = a; Thread.sleep(0); a = aa + 1 } else { val bb = b; Thread.sleep(0); b = bb + 1 }; Seq(i) }
+        >>>
+        buildPipe[Int, Int](par) {i => Seq(i * 2)}
+      ) { _ % 2 == 0 }
       >>~
       sink
     )
 
-    (1 to 1000).foreach(i => ctx.feed(i.toString))
+    (1 to 5000).foreach(i => ctx.feed(i.toString))
     Seq("a", "b", "c").foreach(ctx.feed(_))
-    (1001 to 2000).foreach(i => ctx.feed(i.toString))
+    (5001 to 10000).foreach(i => ctx.feed(i.toString))
     println(ctx.statusString)
     ctx.await()
 
-    results.sorted should be((1 to 2000).map(_ * 2))
+    results.sorted should be((1 to 10000).map(_ * 2))
+    a should be(5000)
+    b should be(5000)
   }
 }
