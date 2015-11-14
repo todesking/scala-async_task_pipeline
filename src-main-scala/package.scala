@@ -125,8 +125,10 @@ trait PipeExecution[-A, +B] extends DataflowExecution with SinkExecution[A] with
   override def feed(value: A): Unit =
     feedPipe1(value) { _ => }
 
+  // callback is executed when all value is calculated
   def feedPipe(value: A)(callback: Seq[B] => Unit): Unit
 
+  // callback is executed when some value is calculated
   def feedPipe1(value: A)(callback: B => Unit): Unit =
     feedPipe(value)(_.foreach(callback))
 
