@@ -110,6 +110,7 @@ object Parallelism {
 trait DataflowExecution {
   def statusString(): String
   def await(): Unit
+  def getSink(name: String): Option[SinkExecution[_]]
 }
 
 trait SinkExecution[-A] extends DataflowExecution {
@@ -164,12 +165,15 @@ object DataflowExecution {
           }
         }
       }
+
     override def feedPipe1(value: A)(cb: C => Unit) =
       left.feedPipe1(value) { v1 =>
         right.feedPipe1(v1)(cb)
       }
 
     override def statusString = s"${left.statusString} >>> ${right.statusString}"
+
+    override def getSink(name: String) = left.getSink(name) orElse right.getSink(name)
   }
 
   case class NamedPipe[A, B](name: String, pipe: PipeExecution[A, B]) extends PipeExecution[A, B] {
@@ -179,12 +183,14 @@ object DataflowExecution {
     override def feed(value: A) = pipe.feed(value)
     override def feedPipe(value: A)(cb: Seq[B] => Unit) = pipe.feedPipe(value)(cb)
     override def feedPipe1(value: A)(cb: B => Unit) = pipe.feedPipe1(value)(cb)
+    override def getSink(name: String) = if(name == this) Some(this) else pipe.getSink(name)
   }
 
   case class NamedSink[A](name: String, sink: SinkExecution[A]) extends SinkExecution[A] {
     override def await() = sink.await()
     override def statusString = s"${name}:[${sink.statusString}]"
     override def feed(value: A) = sink.feed(value)
+    override def getSink(name: String) = if(name == this) Some(this) else sink.getSink(name)
   }
 
   case class PipeToSink[A, B](left: PipeExecution[A, B], right: SinkExecution[B]) extends SinkExecution[A] {
@@ -197,6 +203,8 @@ object DataflowExecution {
       left.feedPipe1(value) { v => right.feed(v) }
 
     override def statusString = s"${left.statusString} >>~ ${right.statusString}"
+
+    override def getSink(name: String) = left.getSink(name) orElse right.getSink(name)
   }
 
   case class ForkJoin[A, B](left: PipeExecution[A, B], right: PipeExecution[A, B]) extends PipeExecution[A, B] {
@@ -233,23 +241,27 @@ object DataflowExecution {
     }
 
     override def statusString = s"(${left.statusString()} <=> ${right.statusString()}) >>> ${outBuffer.statusString()}"
+
+    override def getSink(name: String) = left.getSink(name) orElse right.getSink(name)
   }
 
   case class ConstantPipe[A, B](threadNum: Int, f: A => Seq[B]) extends PipeExecution[A, B] {
-      private[this] val pool = new BlockingThreadPoolExecutor(threadNum, threadNum, 1000, 1)
+    private[this] val pool = new BlockingThreadPoolExecutor(threadNum, threadNum, 1000, 1)
 
-      override val executionContext = ExecutionContext.fromExecutor(pool)
+    override val executionContext = ExecutionContext.fromExecutor(pool)
 
-      override def await(): Unit = {
-        pool.shutdown()
-        while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
-      }
+    override def await(): Unit = {
+      pool.shutdown()
+      while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
+    }
 
-      override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
-        Future { callback(f(value)) }(executionContext)
-      }
+    override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
+      Future { callback(f(value)) }(executionContext)
+    }
 
-      override def statusString = s"{threads=${pool.getActiveCount}/${pool.getPoolSize}}"
+    override def statusString = s"{threads=${pool.getActiveCount}/${pool.getPoolSize}}"
+
+    override def getSink(name: String) = None
   }
 
   case class BufferPipe[A, B](size: Int, f: A => Seq[B]) extends PipeExecution[A, B] {
@@ -275,6 +287,8 @@ object DataflowExecution {
       feedInternal(value, callback)
 
     override def statusString = s"buffer(${size - pool.getQueue.remainingCapacity}/${size})"
+
+    override def getSink(name: String) = None
   }
 
   case class Serialize[A, B, C](bufferSize: Int, pipe: PipeExecution[A, B], keyOf: A => C) extends PipeExecution[A, B] {
@@ -284,6 +298,8 @@ object DataflowExecution {
     private[this] val requeueThreads = java.util.concurrent.Executors.newFixedThreadPool(1)
 
     override def executionContext = pipe.executionContext
+
+    override def getSink(name: String) = pipe.getSink(name)
 
     override def await(): Unit = {
       while(queueCount.get > 0) Thread.sleep(0)
