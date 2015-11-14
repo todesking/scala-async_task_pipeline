@@ -12,25 +12,28 @@ libraryDependencies += "com.todesking" %% "async_task_pipeline" % "0.0.1"
 
 ## Usage
 
-1. Build pipes with `AsyncTaskPipeline.builder`
+1. Build pipes/sink with `Dataflow.build*`
 2. Join pipes.
-3. `run()` and get execution context.
+3. `Dataflow.runPipe/runSink` and get Execution object.
 4. `feed()` values to execution context.
 
 ```scala
 import com.todesking.{async_task_pipeline => ap}
 
-val builder = ap.AsyncTaskPipeline.builder
+import ap.Dataflow.{buildPipe, buildSinkToGrowable}
+import ap.Parallelism
+
+val par = Parallelism.Const(100) // concurrency = 100
 
 val output = new scala.collection.mutable.ArrayBuffer[Int]
 
-val context = (
-  builder.pipe[Int, Int].unordered {i => if(i % 2 == 0) Some(i) else None }
-  >>
-  builder.pipe[Int, Int].unordered {i => Some(i * 2)}
-  >>
-  builder.sinkToGrowable(output)
-).run()
+val context = ap.Dataflow.runSink(
+  buildPipe(par) {i: Int => if(i % 2 == 0) Seq(i) else Seq.empty }
+  >>>
+  buildPipe(par) {i: Int => Seq(i * 2)}
+  >>~
+  buildSinkToGrowable(output)
+)
 
 context.feed(1)
 context.feed(2)
@@ -44,35 +47,32 @@ output.sorted == Seq(4, 8)
 ```
 
 ## Architecture
-
 ```scala
-trait Closure {
-  def run():ExecutionContext
+object Dataflow {
+  def buildPipe[A, B](par: Parallelism)(f: A => Seq[B]): Pipe[A, B]
+  def buildSink[A, B](par: Parallelism)(f: A => Unit): Sink[A]
+  def buildSinkToGrowable[A](g: Growable): Sink[A]
+
+  def runPipe[A, B](pipe: Pipe[A, B]): PipeExecution[A, B]
+  def runSink[A](sink: Sink[A]): Sink[A]
 }
 
-trait ExecutionContext {
-  def await():Unit
+trait Dataflow
+trait Sink[-A] extends Dataflow
+trait Pipe[-A, +B] extends Dataflow with Sink[A] {
+  def >>>[C](rhs: Pipe[B, C]): Pipe[A, C]
+  def >>~(rhs: Sink[B]): Sink[A]
+  def <=>(rhs: Pipe[A, B]): Pipe[A, B]
 }
 
-trait Source[A] extends Closure {
-  def >>(sink:Sink[A]):Closure
-  def >>[B](pipe:Pipe[A, B]):Source[B]
-  override def run():SourceExecutionContext[A]
+trait DataflowExecution {
+  def await(): Unit
 }
-trait SourceExecutionContext[A] extends ExecutionContext {
-  def wireTo(sink:SinkExecutionContext[A]):Unit
+trait SinkExecution[-A] extends DataflowExecution {
+  def feed(value: A): Unit
 }
-
-Sink[A] extends Closure {
-  override def run():SinkExecutionContext[A]
-}
-trait SinkExecutionContext[A] extends ExecutionContext {
-  def feed(value:A):Unit
-}
-
-
-trait PipeExecutionContext[A, B] extends ExecutionContext with SinkExecutionContext[A] with SourceExecutionContext[B]
-trait Pipe[A, B] extends Closure with Sink[A] with Source[B] {
-  override def run():PipeExecutionContext[A, B]
+trait PipeExecution[-A, +B] extends DataflowExecution with SinkExecution[A] {
+  def feedPipe(value: A)(callback: Seq[B] => Unit): Unit
+  def feedPipe1(value: A)(callback: B => Unit): Unit
 }
 ```
