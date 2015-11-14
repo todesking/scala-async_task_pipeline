@@ -69,6 +69,22 @@ class Spec extends FlatSpec with Matchers {
     results.sorted should be(1 to 1001)
   }
 
+  "concurrency limit" should "works well" in {
+    val par = ap.Parallelism.Constant(1000)
+    var a: Int = 0
+    var b: Int = 0
+    val ctx = runSink(
+      serialize(100)(
+        buildPipe(par){i: Int => if(i % 2 == 0) { val aa = a; Thread.sleep(0); a = aa + 1 } else { val bb = b; Thread.sleep(0); b = bb + 1 }; Seq.empty }
+      ) {i => i % 2 }
+    )
+    (1 to 10000).foreach { i => ctx.feed(i) }
+    ctx.await()
+
+    a should be(5000)
+    b should be(5000)
+  }
+
   "Complex pipeline" should "process values" in {
     val results = new mutable.ArrayBuffer[Int]
     val sink = buildSinkToGrowable(results)

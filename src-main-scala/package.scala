@@ -125,7 +125,10 @@ trait PipeExecution[-A, +B] extends DataflowExecution with SinkExecution[A] with
   override def feed(value: A): Unit =
     feedPipe(value) { _ => }
 
-  def feedPipe(value: A)(callback: B => Unit): Unit
+  def feedPipe(value: A)(callback: Seq[B] => Unit): Unit
+
+  def feedPipe1(value: A)(callback: B => Unit): Unit =
+    feedPipe(value)(_.foreach(callback))
 
   def >>>[C](pipe: PipeExecution[B, C]): PipeExecution[A, C] =
     DataflowExecution.PipeToPipe(this, pipe)
@@ -146,10 +149,17 @@ object DataflowExecution {
       right.await()
     }
 
-    override def feedPipe(value: A)(callback: C => Unit): Unit =
-      left.feedPipe(value) { v1 =>
-        right.feedPipe(v1) { v2 =>
-          callback(v2)
+    override def feedPipe(value: A)(callback: Seq[C] => Unit): Unit =
+      left.feedPipe(value) { vs1 =>
+        val results = scala.collection.mutable.ArrayBuffer.empty[C]
+        val countdown = new java.util.concurrent.atomic.AtomicInteger(vs1.size)
+        vs1.foreach { v2 =>
+          right.feedPipe(v2) { vs3 =>
+            results.synchronized { results ++= vs3 }
+            if(countdown.decrementAndGet() == 0) {
+              callback(results)
+            }
+          }
         }
       }
 
@@ -161,7 +171,8 @@ object DataflowExecution {
     override def await() = pipe.await()
     override def statusString = s"${name}:[${pipe.statusString}]"
     override def feed(value: A) = pipe.feed(value)
-    override def feedPipe(value: A)(cb: B => Unit) = pipe.feedPipe(value)(cb)
+    override def feedPipe(value: A)(cb: Seq[B] => Unit) = pipe.feedPipe(value)(cb)
+    override def feedPipe1(value: A)(cb: B => Unit) = pipe.feedPipe1(value)(cb)
   }
 
   case class NamedSink[A](name: String, sink: SinkExecution[A]) extends SinkExecution[A] {
@@ -177,7 +188,7 @@ object DataflowExecution {
     }
 
     override def feed(value: A): Unit =
-      left.feedPipe(value) { v => right.feed(v) }
+      left.feedPipe1(value) { v => right.feed(v) }
 
     override def statusString = s"${left.statusString} >>~ ${right.statusString}"
   }
@@ -193,10 +204,10 @@ object DataflowExecution {
       outBuffer.await()
     }
 
-    override def feedPipe(value: A)(callback: B => Unit): Unit = {
-      def feedToOut(b: B): Unit = {
-        callback(b)
-        outBuffer.feed(b)
+    override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
+      def feedToOut(bs: Seq[B]): Unit = {
+        callback(bs)
+        bs.foreach(outBuffer.feed(_))
       }
       left.feedPipe(value)(feedToOut)
       right.feedPipe(value)(feedToOut)
@@ -215,8 +226,8 @@ object DataflowExecution {
         while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
       }
 
-      override def feedPipe(value: A)(callback: B => Unit): Unit = {
-        Future { f(value).foreach(callback) }(executionContext)
+      override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
+        Future { callback(f(value)) }(executionContext)
       }
 
       override def statusString = s"{threads=${pool.getActiveCount}/${pool.getPoolSize}}"
@@ -225,10 +236,10 @@ object DataflowExecution {
   case class BufferPipe[A, B](size: Int, f: A => Seq[B]) extends PipeExecution[A, B] {
     private[this] val pool = new BlockingThreadPoolExecutor(1, 1, 1000, size)
 
-    private[this] def feedInternal(value: A, callback: B => Unit) =
+    private[this] def feedInternal(value: A, callback: Seq[B] => Unit) =
       pool.execute(new Runnable {
         override def run() {
-          f(value).foreach(callback)
+          callback(f(value))
         }
       })
 
@@ -239,16 +250,9 @@ object DataflowExecution {
       while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
     }
 
-    def sleepUntilEmpty(): Unit = {
-      while(pool.getQueue.size() > 0) Thread.sleep(0)
-    }
+    private[this] val doNothing = { _: Seq[B] => }
 
-    private[this] val doNothing = { _: B => }
-
-    override def feed(value: A): Unit =
-      feedInternal(value, doNothing)
-
-    override def feedPipe(value: A)(callback: B => Unit): Unit =
+    override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit =
       feedInternal(value, callback)
 
     override def statusString = s"buffer(${size - pool.getQueue.remainingCapacity}/${size})"
@@ -257,21 +261,28 @@ object DataflowExecution {
   case class Serialize[A, B, C](bufferSize: Int, pipe: PipeExecution[A, B], keyOf: A => C) extends PipeExecution[A, B] {
     private[this] val buffer = BufferPipe(bufferSize, {v: A => Seq(v) })
     private[this] var running = scala.collection.mutable.Set.empty[C]
+    private[this] val queueCount = new java.util.concurrent.atomic.AtomicInteger(0)
     private[this] val requeueThreads = java.util.concurrent.Executors.newFixedThreadPool(1)
 
     override def executionContext = pipe.executionContext
 
     override def await(): Unit = {
-      buffer.sleepUntilEmpty()
+      while(queueCount.get > 0) Thread.sleep(0)
+
       requeueThreads.shutdown()
       while(!requeueThreads.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
       buffer.await()
       pipe.await()
     }
 
-    override def feedPipe(value: A)(callback: B => Unit): Unit = {
+    override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
+      queueCount.incrementAndGet()
+      feedPipeInternal(value, keyOf(value), callback)
+    }
+
+    def feedPipeInternal(value: A, key: C, callback: Seq[B] => Unit): Unit = {
       val k = keyOf(value)
-      buffer.feedPipe(value) { v =>
+      buffer.feedPipe(value) { _ =>
         val go = synchronized {
           if(!running.contains(k)) {
             running += k
@@ -282,14 +293,15 @@ object DataflowExecution {
         }
 
         if(go) {
-          pipe.feedPipe(v) { result =>
+          pipe.feedPipe(value) { vs =>
             synchronized { running -= k }
-            callback(result)
+            callback(vs)
           }
+          queueCount.decrementAndGet()
         } else {
           requeueThreads.execute(new Runnable {
             override def run(): Unit = {
-              feedPipe(v)(callback)
+              feedPipeInternal(value, k, callback)
             }
           })
         }
