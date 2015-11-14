@@ -76,3 +76,8 @@ trait PipeExecution[-A, +B] extends DataflowExecution with SinkExecution[A] {
   def feedPipe1(value: A)(callback: B => Unit): Unit
 }
 ```
+
+## TODO
+
+* Error handling
+* Througput in statusString
