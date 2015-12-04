@@ -7,7 +7,7 @@ AsyncTaskPipeline is framework for building in-process parallel task processing 
 ```scala
 resolvers += "com.todesking" at "http://todesking.github.io/mvn/"
 
-libraryDependencies += "com.todesking" %% "async_task_pipeline" % "0.0.1"
+libraryDependencies += "com.todesking" %% "async_task_pipeline" % "0.0.9"
 ```
 
 ## Usage
