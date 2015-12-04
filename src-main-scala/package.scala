@@ -295,7 +295,8 @@ object DataflowExecution {
     private[this] val buffer = BufferPipe(bufferSize, {v: A => Seq(v) })
     private[this] var running = scala.collection.mutable.Set.empty[C]
     private[this] val queueCount = new java.util.concurrent.atomic.AtomicInteger(0)
-    private[this] val requeueThreads = java.util.concurrent.Executors.newFixedThreadPool(1)
+    private[this] val requeueQueue = new java.util.concurrent.LinkedBlockingQueue[Runnable]()
+    private[this] val requeueThreads = new BlockingThreadPoolExecutor(1, 1, 1000, requeueQueue)
 
     override def executionContext = pipe.executionContext
 
@@ -343,6 +344,6 @@ object DataflowExecution {
       }
     }
 
-    override def statusString = s"serialized(buffer={${buffer.statusString()}}, executor={${pipe.statusString()}})"
+    override def statusString = s"serialized(buffer={${buffer.statusString()}+{${requeueQueue.size}}}, executor={${pipe.statusString()}})"
   }
 }
