@@ -1,11 +1,9 @@
 package com.todesking.async_task_pipeline
 
-import scala.concurrent.Future
 import scala.concurrent.ExecutionContext
 
 import scala.language.existentials
 
-import scalaz.std.scalaFuture._
 import scalaz.std.vector._
 import scalaz.std.indexedSeq._
 import scalaz.syntax.monad._
@@ -256,7 +254,7 @@ object DataflowExecution {
     }
 
     override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
-      Future { callback(f(value)) }(executionContext)
+      executionContext.execute(new Runnable { override def run(): Unit = { callback(f(value)) } })
     }
 
     override def statusString = s"{threads=${pool.getActiveCount}/${pool.getPoolSize}}"
