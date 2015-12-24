@@ -4,10 +4,6 @@ import scala.concurrent.ExecutionContext
 
 import scala.language.existentials
 
-import scalaz.std.vector._
-import scalaz.std.indexedSeq._
-import scalaz.syntax.monad._
-
 sealed trait Dataflow {
   def named(name: String): Dataflow
 }
@@ -278,8 +274,6 @@ object DataflowExecution {
       pool.shutdown()
       while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
     }
-
-    private[this] val doNothing = { _: Seq[B] => }
 
     override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit =
       feedInternal(value, callback)

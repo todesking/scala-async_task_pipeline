@@ -19,5 +19,5 @@ scalaSource in Compile := baseDirectory.value / "src-main-scala"
 scalaSource in Test := baseDirectory.value / "src-test-scala"
 
 scalacOptions ++= Seq(
-  "-deprecation", "-feature"
+  "-deprecation", "-feature", "-unchecked", "-Xlint", "-Ywarn-unused-import", "-Ywarn-unused"
 )
