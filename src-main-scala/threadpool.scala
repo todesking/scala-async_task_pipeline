@@ -18,6 +18,22 @@ class BlockingThreadPoolExecutor(corePoolSize:Int, maxPoolSize:Int, keepAliveMil
 ) {
   def this(corePoolSize: Int, maxPoolSize: Int, keepAliveMillis: Int, queueSize: Int) =
     this(corePoolSize, maxPoolSize, keepAliveMillis, new java.util.concurrent.ArrayBlockingQueue[Runnable](queueSize))
+
+  private[this] var errorHandlers = Seq.empty[Throwable => Unit]
+
+  def onError(h: Throwable => Unit): Unit = synchronized {
+    this.errorHandlers = errorHandlers :+ h
+  }
+
+  override def afterExecute(r: Runnable, t: Throwable): Unit = {
+    if(t != null) {
+      synchronized { errorHandlers }.foreach { h =>
+        try { h(t) } catch { case e: Throwable => }
+      }
+    }
+  }
+
+  def abort(): Unit = shutdownNow()
 }
 
 

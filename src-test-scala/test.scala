@@ -119,4 +119,15 @@ class Spec extends FlatSpec with Matchers {
     a should be(5000)
     b should be(5000)
   }
+
+  "DataflowExecution.await" should "rethrow error from pipe execution" in {
+    val par = ap.Parallelism.Constant(100)
+    val ctx = runSink(
+      buildPipe(par) { i: Int => throw new RuntimeException(i.toString) }
+    )
+
+    ctx.feed(999)
+
+    the[RuntimeException] thrownBy { ctx.await() } should have message("999")
+  }
 }

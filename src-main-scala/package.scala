@@ -103,8 +103,23 @@ object Parallelism {
 
 trait DataflowExecution {
   def statusString(): String
-  def await(): Unit
   def getSink(name: String): Option[SinkExecution[_]]
+  def abort(): Unit
+  protected def awaitInternal(): Unit
+
+  final def await(): Unit = {
+    awaitInternal()
+    synchronized {
+      if(exception != null)
+        throw exception
+    }
+  }
+
+  protected def setException(e: Throwable): Unit = synchronized {
+    println(e)
+    this.exception = e
+  }
+  private[this] var exception: Throwable = null
 }
 
 trait SinkExecution[-A] extends DataflowExecution {
@@ -141,7 +156,12 @@ object DataflowExecution {
   case class PipeToPipe[A, B, C](left: PipeExecution[A, B], right: PipeExecution[B, C]) extends PipeExecution[A, C] {
     override def executionContext = right.executionContext
 
-    override def await(): Unit = {
+    override def abort(): Unit = {
+      left.abort()
+      right.abort()
+    }
+
+    override def awaitInternal(): Unit = {
       left.await()
       right.await()
     }
@@ -172,23 +192,30 @@ object DataflowExecution {
 
   case class NamedPipe[A, B](name: String, pipe: PipeExecution[A, B]) extends PipeExecution[A, B] {
     override def executionContext = pipe.executionContext
-    override def await() = pipe.await()
+    override def awaitInternal() = pipe.await()
     override def statusString = s"${name}:[${pipe.statusString}]"
     override def feed(value: A) = pipe.feed(value)
     override def feedPipe(value: A)(cb: Seq[B] => Unit) = pipe.feedPipe(value)(cb)
     override def feedPipe1(value: A)(cb: B => Unit) = pipe.feedPipe1(value)(cb)
     override def getSink(name: String) = if(name == this) Some(this) else pipe.getSink(name)
+    override def abort() = pipe.abort()
   }
 
   case class NamedSink[A](name: String, sink: SinkExecution[A]) extends SinkExecution[A] {
-    override def await() = sink.await()
+    override def awaitInternal() = sink.await()
     override def statusString = s"${name}:[${sink.statusString}]"
     override def feed(value: A) = sink.feed(value)
     override def getSink(name: String) = if(name == this) Some(this) else sink.getSink(name)
+    override def abort() = sink.abort()
   }
 
   case class PipeToSink[A, B](left: PipeExecution[A, B], right: SinkExecution[B]) extends SinkExecution[A] {
-    override def await(): Unit = {
+    override def abort() = {
+      left.abort()
+      right.abort()
+    }
+
+    override def awaitInternal(): Unit = {
       left.await()
       right.await()
     }
@@ -204,9 +231,15 @@ object DataflowExecution {
   case class ForkJoin[A, B](left: PipeExecution[A, B], right: PipeExecution[A, B]) extends PipeExecution[A, B] {
     private[this] val outBuffer = BufferPipe(1, {v: B => Seq(v) })
 
+    override def abort() = {
+      left.abort()
+      right.abort()
+      outBuffer.abort()
+    }
+
     override def executionContext = outBuffer.executionContext
 
-    override def await(): Unit = {
+    override def awaitInternal(): Unit = {
       left.await()
       right.await()
       outBuffer.await()
@@ -242,9 +275,13 @@ object DataflowExecution {
   case class ConstantPipe[A, B](threadNum: Int, f: A => Seq[B]) extends PipeExecution[A, B] {
     private[this] val pool = new BlockingThreadPoolExecutor(threadNum, threadNum, 1000, 1)
 
+    pool.onError(setException)
+
+    override def abort() = pool.abort()
+
     override val executionContext = ExecutionContext.fromExecutor(pool)
 
-    override def await(): Unit = {
+    override def awaitInternal(): Unit = {
       pool.shutdown()
       while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
     }
@@ -261,6 +298,10 @@ object DataflowExecution {
   case class BufferPipe[A, B](size: Int, f: A => Seq[B]) extends PipeExecution[A, B] {
     private[this] val pool = new BlockingThreadPoolExecutor(1, 1, 1000, size)
 
+    pool.onError(setException)
+
+    override def abort() = pool.abort()
+
     private[this] def feedInternal(value: A, callback: Seq[B] => Unit) =
       pool.execute(new Runnable {
         override def run() {
@@ -270,7 +311,7 @@ object DataflowExecution {
 
     override def executionContext = ExecutionContext.fromExecutor(pool)
 
-    override def await(): Unit = {
+    override def awaitInternal(): Unit = {
       pool.shutdown()
       while(!pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS)) ();
     }
@@ -290,11 +331,19 @@ object DataflowExecution {
     private[this] val requeueQueue = new java.util.concurrent.LinkedBlockingQueue[Runnable]()
     private[this] val requeueThreads = new BlockingThreadPoolExecutor(1, 1, 1000, requeueQueue)
 
+    requeueThreads.onError(setException)
+
+    override def abort() = {
+      requeueThreads.abort()
+      buffer.abort()
+      pipe.abort()
+    }
+
     override def executionContext = pipe.executionContext
 
     override def getSink(name: String) = pipe.getSink(name)
 
-    override def await(): Unit = {
+    override def awaitInternal(): Unit = {
       while(queueCount.get > 0) Thread.sleep(0)
 
       requeueThreads.shutdown()
