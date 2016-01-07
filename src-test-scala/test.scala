@@ -128,7 +128,7 @@ class Spec extends FlatSpec with Matchers {
 
     ctx.feed(999)
 
-    the[RuntimeException] thrownBy { ctx.await() } should have message("999")
+    the[RuntimeException] thrownBy { ctx.await() } should have message("java.lang.RuntimeException: 999")
   }
 
   "serialize" should "customize retry behavior" in {

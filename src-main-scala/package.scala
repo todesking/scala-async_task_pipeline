@@ -120,7 +120,7 @@ trait DataflowExecution {
     awaitInternal()
     synchronized {
       if(exception != null)
-        throw exception
+        throw new RuntimeException(exception)
     }
   }
 
@@ -169,7 +169,7 @@ object DataflowExecution {
     override def executionContext = pipe.executionContext
     override def awaitInternal() = pipe.await()
     override def statusString = s"${pipe.statusString}"
-    override def feed(value: A) = pipe.feedPipe1(value) { b => f(b).toSeq }
+    override def feed(value: A) = pipe.feedPipe1(value) { b => f(b) }
     override def feedPipe(value: A)(cb: Seq[C] => Unit) = pipe.feedPipe(value) { bs => cb(bs.map(f).flatMap(_.toSeq)) }
     override def feedPipe1(value: A)(cb: C => Unit) = pipe.feedPipe1(value) { b => f(b).toSeq.foreach(cb) }
     override def getSink(name: String) = pipe.getSink(name)
