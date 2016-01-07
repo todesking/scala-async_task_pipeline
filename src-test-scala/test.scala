@@ -130,4 +130,25 @@ class Spec extends FlatSpec with Matchers {
 
     the[RuntimeException] thrownBy { ctx.await() } should have message("999")
   }
+
+  "serialize" should "customize retry behavior" in {
+    val results = new mutable.ArrayBuffer[Either[Int, String]]
+    val sink = buildSinkToGrowable(results)
+    val par = ap.Parallelism.Constant(100)
+    val ctx = runSink(
+      serialize(100) { i: Int => 0 }(
+        buildPipe(par) { i: Int => Thread.sleep(100); Seq(i.toString) }
+      ).retry { (item, n) => false }
+      >>~ sink
+    )
+    ctx.feed(1)
+    Thread.sleep(10)
+    ctx.feed(2)
+    Thread.sleep(10)
+    ctx.feed(3)
+    ctx.await()
+
+    results.size should be(3)
+    results should contain only(Right("1"), Left(2), Left(3))
+  }
 }

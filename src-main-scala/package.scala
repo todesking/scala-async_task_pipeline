@@ -39,7 +39,7 @@ object Dataflow {
       g += value
     }
 
-  def serialize[A, B, C](bufferSize: Int)(key: A => C)(pipe: Pipe[A, B]): Pipe[A, B] =
+  def serialize[A, B, C](bufferSize: Int)(key: A => C)(pipe: Pipe[A, B]): Serialize[A, B, C] =
     Serialize(bufferSize, pipe, key)
 
   def runSink[A](sink: Sink[A]): SinkExecution[A] = sink match {
@@ -63,7 +63,9 @@ object Dataflow {
     case NamedPipe(name, pipe) =>
       DataflowExecution.NamedPipe(name, runPipe(pipe))
     case Serialize(queue, pipe, key) =>
-      DataflowExecution.Serialize(queue, runPipe(pipe), key)
+      DataflowExecution.Serialize(queue, runPipe(pipe), key, {(_: A, _: Int) => true}).collect { case Right(a) => a }
+    case p @ SerializeWithRejected(queue, pipe, key, retry) =>
+      DataflowExecution.Serialize(queue, runPipe[A, p.OutType](pipe), key, retry)
   }
 
   case class NamedSink[A](name: String, sink: Sink[A]) extends Sink[A]
@@ -80,7 +82,14 @@ object Dataflow {
 
   case class ForkJoin[A, B](left: Pipe[A, B], right: Pipe[A, B]) extends Pipe[A, B]
 
-  case class Serialize[A, B, C](queueSize: Int, pipe: Pipe[A, B], key: A => C) extends Pipe[A, B]
+  case class Serialize[A, B, C](queueSize: Int, pipe: Pipe[A, B], key: A => C) extends Pipe[A, B] {
+    def retry(r: (A, Int) => Boolean): SerializeWithRejected[A, B, C] =
+      SerializeWithRejected(queueSize, pipe, key, r)
+  }
+
+  case class SerializeWithRejected[A, B, C](queueSize: Int, pipe: Pipe[A, B], key: A => C, shouldRetry: (A, Int) => Boolean) extends Pipe[A, Either[A, B]] {
+    type OutType = B
+  }
 }
 
 trait Parallelism {
@@ -150,9 +159,22 @@ trait PipeExecution[-A, +B] extends DataflowExecution with SinkExecution[A] with
 
   def <=>[AA <: A, BB >: B](right: PipeExecution[AA, BB]): PipeExecution[AA, BB] =
     DataflowExecution.ForkJoin(this, right)
+
+  def collect[C](f: PartialFunction[B, C]): PipeExecution[A, C] =
+    DataflowExecution.Collect(this, f.lift)
 }
 
 object DataflowExecution {
+  case class Collect[A, B, C](pipe: PipeExecution[A, B], f: B => Option[C]) extends PipeExecution[A, C] {
+    override def executionContext = pipe.executionContext
+    override def awaitInternal() = pipe.await()
+    override def statusString = s"${pipe.statusString}"
+    override def feed(value: A) = pipe.feedPipe1(value) { b => f(b).toSeq }
+    override def feedPipe(value: A)(cb: Seq[C] => Unit) = pipe.feedPipe(value) { bs => cb(bs.map(f).flatMap(_.toSeq)) }
+    override def feedPipe1(value: A)(cb: C => Unit) = pipe.feedPipe1(value) { b => f(b).toSeq.foreach(cb) }
+    override def getSink(name: String) = pipe.getSink(name)
+    override def abort() = pipe.abort()
+  }
   case class PipeToPipe[A, B, C](left: PipeExecution[A, B], right: PipeExecution[B, C]) extends PipeExecution[A, C] {
     override def executionContext = right.executionContext
 
@@ -324,8 +346,9 @@ object DataflowExecution {
     override def getSink(name: String) = None
   }
 
-  case class Serialize[A, B, C](bufferSize: Int, pipe: PipeExecution[A, B], keyOf: A => C) extends PipeExecution[A, B] {
-    private[this] val buffer = BufferPipe(bufferSize, {v: A => Seq(v) })
+  case class Serialize[A, B, C](bufferSize: Int, pipe: PipeExecution[A, B], keyOf: A => C, retry: (A, Int) => Boolean) extends PipeExecution[A, Either[A, B]] {
+    type OutType = B
+    private[this] val buffer = BufferPipe(bufferSize, {v: (A, Int) => Seq(v) })
     private[this] var running = scala.collection.mutable.Set.empty[C]
     private[this] val queueCount = new java.util.concurrent.atomic.AtomicInteger(0)
     private[this] val requeueQueue = new java.util.concurrent.LinkedBlockingQueue[Runnable]()
@@ -352,17 +375,16 @@ object DataflowExecution {
       pipe.await()
     }
 
-    override def feedPipe(value: A)(callback: Seq[B] => Unit): Unit = {
+    override def feedPipe(value: A)(callback: Seq[Either[A, B]] => Unit): Unit = {
       queueCount.incrementAndGet()
-      feedPipeInternal(value, keyOf(value), callback)
+      feedPipeInternal((value -> 0), keyOf(value), callback)
     }
 
-    def feedPipeInternal(value: A, key: C, callback: Seq[B] => Unit): Unit = {
-      val k = keyOf(value)
+    def feedPipeInternal(value: (A, Int), key: C, callback: Seq[Either[A, B]] => Unit): Unit = {
       buffer.feedPipe(value) { _ =>
         val go = synchronized {
-          if(!running.contains(k)) {
-            running += k
+          if(!running.contains(key)) {
+            running += key
             true
           } else {
             false
@@ -370,17 +392,20 @@ object DataflowExecution {
         }
 
         if(go) {
-          pipe.feedPipe(value) { vs =>
-            synchronized { running -= k }
-            callback(vs)
+          pipe.feedPipe(value._1) { vs =>
+            synchronized { running -= key }
+            callback(vs.map(Right(_)))
           }
           queueCount.decrementAndGet()
-        } else {
+        } else if(retry(value._1, value._2)) {
           requeueThreads.execute(new Runnable {
             override def run(): Unit = {
-              feedPipeInternal(value, k, callback)
+              feedPipeInternal(value, key, callback)
             }
           })
+        } else {
+          pipe.executionContext.execute(new Runnable { override def run(): Unit = { callback(Seq(Left(value._1))) } })
+          queueCount.decrementAndGet()
         }
       }
     }
