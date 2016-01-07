@@ -138,17 +138,15 @@ class Spec extends FlatSpec with Matchers {
     val ctx = runSink(
       serialize(100) { i: Int => 0 }(
         buildPipe(par) { i: Int => Thread.sleep(100); Seq(i.toString) }
-      ).retry { (item, n) => false }
+      ).retry { (item, n) => Thread.sleep(10); n < 10 }
       >>~ sink
     )
     ctx.feed(1)
-    Thread.sleep(10)
     ctx.feed(2)
-    Thread.sleep(10)
     ctx.feed(3)
     ctx.await()
 
     results.size should be(3)
-    results should contain only(Right("1"), Left(2), Left(3))
+    results should contain only(Right("1"), Right("2"), Left(3))
   }
 }

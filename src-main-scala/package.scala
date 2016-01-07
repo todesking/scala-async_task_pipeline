@@ -400,7 +400,7 @@ object DataflowExecution {
         } else if(retry(value._1, value._2)) {
           requeueThreads.execute(new Runnable {
             override def run(): Unit = {
-              feedPipeInternal(value, key, callback)
+              feedPipeInternal(value._1 -> (value._2 + 1), key, callback)
             }
           })
         } else {
